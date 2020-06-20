@@ -7,7 +7,7 @@ all : mutex factorial
 mutex : mutex.o
 	$(CC) -o mutex -lpthread mutex.o
 
-mod : factorial.o
+factoria : factorial.o
     $(CC) -o factorial -lpthread factorial.o
 
 mutex.o : 

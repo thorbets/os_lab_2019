@@ -1,147 +1,194 @@
-#include <stdint.h>
+#include <limits.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdbool.h>
+#include <string.h>
+#include <unistd.h>
 
-#include <pthread.h>
 #include <getopt.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 
+#include "pthread.h"
 
-pthread_mutex_t mut = PTHREAD_MUTEX_INITIALIZER;
+#include "mult_mod.h"
 
-struct FaktArgs {
-
-  uint32_t faktorial;
-  uint32_t mod;
-  uint32_t current;
-  uint32_t next;
-  uint32_t part;
-
+struct FactorialArgs {
+  uint64_t begin;
+  uint64_t end;
+  uint64_t mod;
 };
 
-int ModFakt(struct FaktArgs *args) {
-  
-  uint32_t m = (*args).mod;
-  uint32_t f = (*args).faktorial;
-  uint32_t c = (*args).current;
-  uint32_t n = (*args).next;
-  uint32_t p = (*args).part;
 
-  uint32_t i;
-  for (i = 0; i < p; i++){
-      pthread_mutex_lock(&mut);
-      c = (c * n) % m;
-      //printf("c= %i\n", c);
-      n++;
-      //printf("n= %i\n", n);
-      
-      (*args).next = n;
-      (*args).current = c;
-      if (n > f) {
-          break;
-      }
-    pthread_mutex_unlock(&mut);
-  }
-  return 0;
+uint64_t Factorial(const struct FactorialArgs *args) {
+
+    uint64_t ans = 1;
+	for(uint64_t i = args->begin; i < args->end; i++)
+		ans = MultMod(ans, i, args->mod);
+  return ans;
 }
 
-void *ThreadFakt(void *args) {
-  struct FaktArgs *fakt_args = (struct FaktArgs *)args;
-  return (void *)(size_t)ModFakt(fakt_args);
+void *ThreadFactorial(void *args) {
+  struct FactorialArgs *fargs = (struct FactorialArgs *)args;
+  return (void *)(uint64_t *)Factorial(fargs);
 }
 
 int main(int argc, char **argv) {
+  int tnum = -1;
+  int port = -1;
 
-  uint32_t faktorial = 0;
-  uint32_t threads_num = 0;
-  uint32_t mod = 0;
-
-  pthread_t threads[threads_num];
-
-   while (true) {
+  while (true) {
     int current_optind = optind ? optind : 1;
 
-    static struct option options[] = {{"mod", required_argument, 0, 0},
-                                      {"faktorial", required_argument, 0, 0},
-                                      {"threads_num", required_argument, 0, 0},
+    static struct option options[] = {{"port", required_argument, 0, 0},
+                                      {"tnum", required_argument, 0, 0},
                                       {0, 0, 0, 0}};
 
     int option_index = 0;
-    int c = getopt_long(argc, argv, "f", options, &option_index);
+    int c = getopt_long(argc, argv, "", options, &option_index);
 
-    if (c == -1) break;
+    if (c == -1)
+      break;
 
     switch (c) {
+    case 0: {
+      switch (option_index) {
       case 0:
-        switch (option_index) {
-          case 0:
-            mod = atoi(optarg);
-              if (mod <= 0) {
-                printf("mod is a positive number\n");
+        port = atoi(optarg);
+         if (port <= 0) {
+                printf("port is a positive number\n");
                  return 1;
                 }
-            break;
-          case 1:
-            faktorial = atoi(optarg);
-             if (faktorial <= 0) {
-                printf("faktorial is a positive number\n");
-                 return 1;
-                }
-            break;
-          case 2:
-            threads_num = atoi(optarg);
-             if (threads_num <= 0) {
-                printf("threads_num is a positive number\n");
-                 return 1;
-                }
-            break;
-
-          defalut:
-            printf("Index %d is out of options\n", option_index);
-        }
         break;
-
-      case '?':
+      case 1:
+        tnum = atoi(optarg);
+         if (tnum <= 0) {
+                printf("tnum is a positive number\n");
+                 return 1;
+                }
         break;
-
       default:
-        printf("getopt returned character code 0%o?\n", c);
+        printf("Index %d is out of options\n", option_index);
+      }
+    } break;
+
+    case '?':
+      printf("Unknown argument\n");
+      break;
+    default:
+      fprintf(stderr, "getopt returned character code 0%o?\n", c);
     }
   }
 
-  if (optind < argc) {
-    printf("Has at least one no option argument\n");
+  if (port == -1 || tnum == -1) {
+    fprintf(stderr, "Using: %s --port 20001 --tnum 4\n", argv[0]);
     return 1;
   }
 
-  if (mod == 0 || faktorial == 0 || threads_num == 0) {
-    printf("Usage: %s --mod \"num\" --faktorial \"num\" --thread_num \"num\" \n",
-           argv[0]);
+  int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (server_fd < 0) {
+    fprintf(stderr, "Can not create server socket!");
     return 1;
   }
 
-  struct FaktArgs args;
-  args.current = 1;
-  args.next = 2;
-  args.mod = mod;
-  args.faktorial = faktorial;
-  args.part = faktorial/threads_num;
+  struct sockaddr_in server;
+  server.sin_family = AF_INET;
+  server.sin_port = htons((uint16_t)port);
+  server.sin_addr.s_addr = htonl(INADDR_ANY);
 
-  for (uint32_t i = 0; i < threads_num; i++) {
-    if (pthread_create(&threads[i], NULL, ThreadFakt, (void *)&(args))) {
-      printf("Error: pthread_create failed!\n");
-      return 1;
-    }
+  int opt_val = 1;
+  setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt_val, sizeof(opt_val));
+
+  int err = bind(server_fd, (struct sockaddr *)&server, sizeof(server));
+  if (err < 0) {
+    fprintf(stderr, "Can not bind to socket!");
+    return 1;
   }
 
-   for (uint32_t i = 0; i < threads_num; i++) {
-    if (pthread_join(threads[i], NULL) != 0) {
-        perror("pthread_join");
-        exit(1);
-    }
+  err = listen(server_fd, 128);
+  if (err < 0) {
+    fprintf(stderr, "Could not listen on socket\n");
+    return 1;
   }
 
+  printf("Server listening at %d\n", port);
 
-  printf("mod faktorial %i\n", args.current);
-  exit(0);
+  while (true) {
+    struct sockaddr_in client;
+    socklen_t client_len = sizeof(client);
+    int client_fd = accept(server_fd, (struct sockaddr *)&client, &client_len);
+
+    if (client_fd < 0) {
+      fprintf(stderr, "Could not establish new connection\n");
+      continue;
+    }
+
+    while (true) {
+      unsigned int buffer_size = sizeof(uint64_t) * 3;
+      char from_client[buffer_size];
+      int read = recv(client_fd, from_client, buffer_size, 0);
+
+      if (!read)
+        break;
+      if (read < 0) {
+        fprintf(stderr, "Client read failed\n");
+        break;
+      }
+      if (read < buffer_size) {
+        fprintf(stderr, "Client send wrong data format\n");
+        break;
+      }
+
+      pthread_t threads[tnum];
+
+      uint64_t begin = 0;
+      uint64_t end = 0;
+      uint64_t mod = 0;
+      memcpy(&begin, from_client, sizeof(uint64_t));
+      memcpy(&end, from_client + sizeof(uint64_t), sizeof(uint64_t));
+      memcpy(&mod, from_client + 2 * sizeof(uint64_t), sizeof(uint64_t));
+
+      fprintf(stdout, "Receive: %llu %llu %llu\n", begin, end, mod);
+
+      struct FactorialArgs args[tnum];
+      uint64_t dx = (end - begin)/tnum;
+
+      for (uint32_t i = 0; i < tnum; i++) {
+          
+        args[i].begin = begin + i*dx;
+        args[i].end   = (i == (tnum - 1)) ? end : begin + (i+1)*dx;
+        args[i].mod   = mod;
+
+        if (pthread_create(&threads[i], NULL, ThreadFactorial,
+                           (void *)&args[i])) {
+          printf("Error: pthread_create failed!\n");
+          return 1;
+        }
+      }
+
+      uint64_t total = 1;
+      for (uint32_t i = 0; i < tnum; i++) {
+        uint64_t result = 0;
+        pthread_join(threads[i], (void **)&result);
+        total = MultMod(total, result, mod);
+      }
+
+      printf("Total: %llu\n", total);
+
+      char buffer[sizeof(total)];
+      memcpy(buffer, &total, sizeof(total));
+      err = send(client_fd, buffer, sizeof(total), 0);
+      if (err < 0) {
+        fprintf(stderr, "Can't send data to client\n");
+        break;
+      }
+    }
+
+    shutdown(client_fd, SHUT_RDWR);
+    close(client_fd);
+  }
+
+  return 0;
 }
