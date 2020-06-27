@@ -169,7 +169,7 @@ int main(int argc, char **argv) {
     close(sck[i]);
   }
 
-    printf("total: %llu\n", total);
+    printf("total: %lu\n", total);
 
   free(to);
 
