@@ -153,7 +153,7 @@ int main(int argc, char **argv) {
     }
   }
 
-    uint64_t total = 0;
+    uint64_t total = 1;
 
     for (int i = 0; i < servers_num; i++) {
     char response[sizeof(uint64_t)];
@@ -165,7 +165,6 @@ int main(int argc, char **argv) {
     uint64_t answer = 0;
     memcpy(&answer, response, sizeof(uint64_t));
     total = MultMod(total, answer, mod);
-
     close(sck[i]);
   }
 

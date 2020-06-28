@@ -11,6 +11,5 @@ uint64_t MultMod(uint64_t a, uint64_t b, uint64_t mod) {
     a = (a * 2) % mod;
     b /= 2;
   }
-
   return result % mod;
 }
